@@ -10,7 +10,7 @@ module sync_fifo #(
     output logic [WIDTH-1:0]       rdata,
     output logic                   empty,
     output logic                   full,
-    output logic [$clog2(DEPTH):0] fill_level
+    output logic [$clog2(DEPTH):0] count
 );
     localparam int INDEX_BITS = $clog2(DEPTH);
 
@@ -26,7 +26,7 @@ module sync_fifo #(
     assign full  = ((rd_ptr[INDEX_BITS] != wr_ptr[INDEX_BITS]) &&
                     (rd_ptr[INDEX_BITS-1:0] == wr_ptr[INDEX_BITS-1:0]));
 
-    assign fill_level = wr_ptr - rd_ptr;
+    assign count = wr_ptr - rd_ptr;
 
     always_ff @(posedge clk) begin
         if (rst) begin

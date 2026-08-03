@@ -61,7 +61,7 @@ module uart16550a (
     logic [10:0] rx_fifo_rdata;
     logic        rx_fifo_empty;
     logic        rx_fifo_full;
-    logic [4:0]  rx_fifo_fill_level;
+    logic [4:0]  rx_fifo_count;
 
     logic        rx_fifo_successful_push;
     logic        rx_fifo_successful_pop;
@@ -93,7 +93,7 @@ module uart16550a (
     assign rx_fifo_head_has_err     = !rx_fifo_empty && |rx_fifo_rdata[10:8];
     assign rx_fifo_head_err_cleared = rx_fifo_head_has_err && lsr_err_ack;
     assign rx_fifo_pending_err      = (rx_fifo_err_count > 1) || (rx_fifo_err_count == 1 && !rx_fifo_head_err_cleared);
-    assign rx_fifo_trigger_met      = (rx_fifo_fill_level >= rx_fifo_trigger_threshold);
+    assign rx_fifo_trigger_met      = (rx_fifo_count >= rx_fifo_trigger_threshold);
     assign rx_fifo_push_err         = rx_fifo_push && !rx_fifo_effective_full && |rx_fifo_wdata[10:8];
     assign rx_fifo_pop_err          = rx_fifo_pop && !rx_fifo_empty && |rx_fifo_rdata[10:8];
     assign rx_fifo_err_present      = (rx_fifo_err_count != 0);
@@ -147,7 +147,7 @@ module uart16550a (
         .rdata      (rx_fifo_rdata),
         .empty      (rx_fifo_empty),
         .full       (rx_fifo_full),
-        .fill_level (rx_fifo_fill_level)
+        .count      (rx_fifo_count)
     );
 
     // === TX Engine === //
@@ -188,7 +188,7 @@ module uart16550a (
         .rdata      (tx_fifo_rdata),
         .empty      (tx_fifo_empty),
         .full       (tx_fifo_full),
-        .fill_level ()
+        .count      ()
     );
 
     uart16550a_tx uart_tx (
