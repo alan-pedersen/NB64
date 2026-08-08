@@ -1,4 +1,4 @@
-module uart16550a_wb #(
+module uart_16550a_wb #(
     parameter int DW = 32
 )(
     input  logic clk,
@@ -8,37 +8,37 @@ module uart16550a_wb #(
 
     input  logic rx,
     output logic tx,
-    output logic intr
+    output logic irq
 );
-    logic       reg_en;
-    logic       reg_wr;
-    logic [2:0] reg_addr;
-    logic [7:0] reg_wdata;
-    logic [7:0] reg_rdata;
+    logic       csr_en;
+    logic       csr_wr;
+    logic [2:0] csr_addr;
+    logic [7:0] csr_wdata;
+    logic [7:0] csr_rdata;
 
-    assign reg_en    = wb_valid;
-    assign reg_wr    = wb.we;
-    assign reg_addr  = wb.addr[2:0];
-    assign reg_wdata = wb.dat_w[7:0];
+    assign csr_en    = wb_valid;
+    assign csr_wr    = wb.we;
+    assign csr_addr  = wb.addr[2:0];
+    assign csr_wdata = wb.dat_w[7:0];
 
-    uart16550a u_uart16550a (
+    uart_16550a u_uart_16550a (
         .clk       (clk),
         .rst       (rst),
-        .reg_en    (reg_en),
-        .reg_wr    (reg_wr),
-        .reg_addr  (reg_addr),
-        .reg_wdata (reg_wdata),
-        .reg_rdata (reg_rdata),
+        .csr_en    (csr_en),
+        .csr_wr    (csr_wr),
+        .csr_addr  (csr_addr),
+        .csr_wdata (csr_wdata),
+        .csr_rdata (csr_rdata),
         .rx        (rx),
         .tx        (tx),
-        .intr      (intr)
+        .irq       (irq)
     );
 
     logic ack_q;
     logic wb_valid;
 
     assign wb_valid  = wb.cyc & wb.stb & ~ack_q;
-    assign wb.dat_r  = {{(DW-8){1'b0}}, reg_rdata};
+    assign wb.dat_r  = {{(DW-8){1'b0}}, csr_rdata};
     assign wb.ack    = ack_q;
     assign wb.err    = 0;
 

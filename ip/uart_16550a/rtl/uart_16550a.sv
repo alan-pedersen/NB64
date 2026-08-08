@@ -1,24 +1,24 @@
-module uart16550a (
+module uart_16550a (
     input  logic       clk,
     input  logic       rst,
 
-    input  logic       reg_en,
-    input  logic       reg_wr,
-    input  logic [2:0] reg_addr,
-    input  logic [7:0] reg_wdata,
-    output logic [7:0] reg_rdata,
+    input  logic       csr_en,
+    input  logic       csr_wr,
+    input  logic [2:0] csr_addr,
+    input  logic [7:0] csr_wdata,
+    output logic [7:0] csr_rdata,
 
     input  logic       rx,
     output logic       tx,
-    output logic       intr
+    output logic       irq
 );
-    import uart16550a_pkg::*;
+    import uart_16550a_pkg::*;
 
-    logic reg_re;
-    logic reg_we;
+    logic csr_re;
+    logic csr_we;
 
-    assign reg_re = reg_en && !reg_wr;
-    assign reg_we = reg_en && reg_wr;
+    assign csr_re = csr_en && !csr_wr;
+    assign csr_we = csr_en && csr_wr;
 
     // === 16550A Registers === //
 
@@ -41,10 +41,10 @@ module uart16550a (
     logic        fifo_en_toggle;
 
     assign baud_div       = {dlm, dll};
-    assign fcr_write      = reg_we && (reg_addr == 2);
-    assign lsr_read       = reg_re && (reg_addr == 5);
-    assign iir_read       = reg_re && (reg_addr == 2);
-    assign fifo_en_toggle = fcr_write && (reg_wdata[0] != fcr[0]);
+    assign fcr_write      = csr_we && (csr_addr == CSR_FCR);
+    assign lsr_read       = csr_re && (csr_addr == CSR_LSR);
+    assign iir_read       = csr_re && (csr_addr == CSR_IIR);
+    assign fifo_en_toggle = fcr_write && (csr_wdata[0] != fcr[0]);
 
     // === RX Engine === //
 
@@ -81,9 +81,9 @@ module uart16550a (
     logic        rx_fifo_head_err_cleared;
     logic        rx_fifo_pending_err;
 
-    assign rx_fifo_rst              = rst || fifo_en_toggle || (fcr_write && reg_wdata[1]);
+    assign rx_fifo_rst              = rst || fifo_en_toggle || (fcr_write && csr_wdata[1]);
     assign rx_fifo_push             = rx_valid;
-    assign rx_fifo_pop              = reg_re && !lcr[7] && (reg_addr == 0);
+    assign rx_fifo_pop              = csr_re && !lcr[7] && (csr_addr == CSR_RBR);
     assign rx_fifo_wdata            = {rx_bi, rx_fe, rx_pe, rx_data};
     assign rx_fifo_successful_pop   = rx_fifo_pop && !rx_fifo_empty;
     assign rx_fifo_successful_push  = rx_fifo_push && !rx_fifo_effective_full;
@@ -119,7 +119,7 @@ module uart16550a (
         end
     end
 
-    uart16550a_rx uart_rx (
+    uart_16550a_rx uart_rx (
         .clk              (clk),
         .rst              (rst),
         .baud_div         (baud_div),
@@ -139,15 +139,15 @@ module uart16550a (
         .WIDTH (11),
         .DEPTH (16)
     ) rx_fifo (
-        .clk        (clk),
-        .rst        (rx_fifo_rst),
-        .push       (rx_fifo_push),
-        .pop        (rx_fifo_pop),
-        .wdata      (rx_fifo_wdata),
-        .rdata      (rx_fifo_rdata),
-        .empty      (rx_fifo_empty),
-        .full       (rx_fifo_full),
-        .count      (rx_fifo_count)
+        .clk   (clk),
+        .rst   (rx_fifo_rst),
+        .push  (rx_fifo_push),
+        .pop   (rx_fifo_pop),
+        .wdata (rx_fifo_wdata),
+        .rdata (rx_fifo_rdata),
+        .empty (rx_fifo_empty),
+        .full  (rx_fifo_full),
+        .count (rx_fifo_count)
     );
 
     // === TX Engine === //
@@ -168,10 +168,10 @@ module uart16550a (
     // (fcr[0] || tx_fifo_empty) ensures that when FIFO mode is disabled, not more than
     // one push to the FIFO takes place.
 
-    assign tx_fifo_rst   = rst || fifo_en_toggle || (fcr_write && reg_wdata[2]);
-    assign tx_fifo_push  = reg_we && !lcr[7] && (reg_addr == 0) && (fcr[0] || tx_fifo_empty);
+    assign tx_fifo_rst   = rst || fifo_en_toggle || (fcr_write && csr_wdata[2]);
+    assign tx_fifo_push  = csr_we && !lcr[7] && (csr_addr == CSR_THR) && (fcr[0] || tx_fifo_empty);
     assign tx_fifo_pop   = tx_start;
-    assign tx_fifo_wdata = reg_wdata;
+    assign tx_fifo_wdata = csr_wdata;
 
     assign tx_start      = tx_ready && !tx_fifo_empty;
     assign tx_data       = tx_fifo_rdata;
@@ -180,18 +180,18 @@ module uart16550a (
         .WIDTH (8),
         .DEPTH (16)
     ) tx_fifo (
-        .clk        (clk),
-        .rst        (tx_fifo_rst),
-        .push       (tx_fifo_push),
-        .pop        (tx_fifo_pop),
-        .wdata      (tx_fifo_wdata),
-        .rdata      (tx_fifo_rdata),
-        .empty      (tx_fifo_empty),
-        .full       (tx_fifo_full),
-        .count      ()
+        .clk   (clk),
+        .rst   (tx_fifo_rst),
+        .push  (tx_fifo_push),
+        .pop   (tx_fifo_pop),
+        .wdata (tx_fifo_wdata),
+        .rdata (tx_fifo_rdata),
+        .empty (tx_fifo_empty),
+        .full  (tx_fifo_full),
+        .count ()
     );
 
-    uart16550a_tx uart_tx (
+    uart_16550a_tx uart_tx (
         .clk              (clk),
         .rst              (rst),
         .baud_div         (baud_div),
@@ -220,34 +220,43 @@ module uart16550a (
             ier <= 0;
             scr <= 0;
         end
-        else if (reg_we) begin
-            unique0 case (reg_addr)
-                3'd0: if (lcr[7]) dll <= reg_wdata; // THR write handled in tx_fifo_push
-                3'd3: lcr             <= reg_wdata;
-                3'd4: mcr             <= reg_wdata & 8'h3F;
-                3'd7: scr             <= reg_wdata;
+        else if (csr_we) begin
+            unique0 case (csr_addr)
+                CSR_LCR: lcr <= csr_wdata;
+                CSR_MCR: mcr <= csr_wdata & 8'h3F;
+                CSR_SCR: scr <= csr_wdata;
 
-                3'd1: begin
-                    if (lcr[7]) dlm <= reg_wdata;
-                    else        ier <= reg_wdata & 8'h0F;
+                CSR_THR: begin
+                    if (lcr[7]) dll <= csr_wdata;
+                    // THR writes are handled in tx_fifo_push
                 end
-
-                3'd2: begin
-                    if (reg_wdata[0]) fcr <= reg_wdata & 8'hC9; // RX / TX FIFO reset pins simply not registered. Only checked combinationally
-                    else              fcr <= reg_wdata & 8'h01;
+                CSR_FCR: begin
+                    if (csr_wdata[0]) fcr <= csr_wdata & 8'hC9; // RX/TX FIFO reset pins not registered; checked combinationally
+                    else              fcr <= csr_wdata & 8'h01;
+                end
+                CSR_IER: begin
+                    if (lcr[7]) dlm <= csr_wdata;
+                    else        ier <= csr_wdata & 8'h0F;
                 end
             endcase
         end
-        else if (reg_re) begin
-            unique case (reg_addr)
-                3'd0: reg_rdata <= lcr[7] ? dll : rx_fifo_rdata[7:0];
-                3'd1: reg_rdata <= lcr[7] ? dlm : ier;
-                3'd2: reg_rdata <= iir;
-                3'd3: reg_rdata <= lcr;
-                3'd4: reg_rdata <= mcr;
-                3'd5: reg_rdata <= lsr;
-                3'd6: reg_rdata <= msr;
-                3'd7: reg_rdata <= scr;
+        else if (csr_re) begin
+            unique case (csr_addr)
+                CSR_IIR: csr_rdata <= iir;
+                CSR_LCR: csr_rdata <= lcr;
+                CSR_MCR: csr_rdata <= mcr;
+                CSR_LSR: csr_rdata <= lsr;
+                CSR_MSR: csr_rdata <= msr;
+                CSR_SCR: csr_rdata <= scr;
+
+                CSR_RBR: begin
+                    if (lcr[7]) csr_rdata <= dll;
+                    else        csr_rdata <= rx_fifo_rdata[7:0];
+                end
+                CSR_IER: begin
+                    if (lcr[7]) csr_rdata <= dlm;
+                    else        csr_rdata <= ier;
+                end
             endcase
         end
     end
@@ -321,13 +330,13 @@ module uart16550a (
     logic        cti_baud_rst;
     logic        cti_tick_16x;
 
-    assign start_ticks     = 16;
-    assign data_ticks      = (10'd5 + 10'(lcr[1:0])) * 16;
-    assign parity_ticks    = lcr[3] ? 16 : 0;
-    assign stop_ticks      = {5'b0, calc_stop_ticks(lcr[1:0], lcr[2])} * 16;
-    assign timeout_ticks   = (start_ticks + data_ticks + parity_ticks + stop_ticks) * 4;
+    assign start_ticks   = 16;
+    assign data_ticks    = (10'd5 + 10'(lcr[1:0])) * 16;
+    assign parity_ticks  = lcr[3] ? 16 : 0;
+    assign stop_ticks    = {5'b0, calc_stop_ticks(lcr[1:0], lcr[2])} * 16;
+    assign timeout_ticks = (start_ticks + data_ticks + parity_ticks + stop_ticks) * 4;
 
-    assign cti_baud_rst    = rx_fifo_successful_pop || (!timeout && rx_fifo_successful_push); // Matches reset for timeout_counter
+    assign cti_baud_rst  = rx_fifo_successful_pop || (!timeout && rx_fifo_successful_push); // Matches reset for timeout_counter
 
     always_ff @(posedge clk) begin
         if (rst) begin
@@ -389,7 +398,7 @@ module uart16550a (
     assign iir[7:4] = {fcr[0], fcr[0], 2'b00};
 
     always_ff @(posedge clk) begin
-        if (rst) intr <= 0;
-        else     intr <= ~iir[0];
+        if (rst) irq <= 0;
+        else     irq <= ~iir[0];
     end
 endmodule

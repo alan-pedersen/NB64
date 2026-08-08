@@ -1,4 +1,17 @@
-package uart16550a_pkg;
+package uart_16550a_pkg;
+    localparam logic [2:0] CSR_DLL = 3'd0;
+    localparam logic [2:0] CSR_DLM = 3'd1;
+    localparam logic [2:0] CSR_RBR = 3'd0;
+    localparam logic [2:0] CSR_THR = 3'd0;
+    localparam logic [2:0] CSR_FCR = 3'd2;
+    localparam logic [2:0] CSR_LCR = 3'd3;
+    localparam logic [2:0] CSR_MCR = 3'd4;
+    localparam logic [2:0] CSR_IER = 3'd1;
+    localparam logic [2:0] CSR_LSR = 3'd5;
+    localparam logic [2:0] CSR_MSR = 3'd6;
+    localparam logic [2:0] CSR_IIR = 3'd2;
+    localparam logic [2:0] CSR_SCR = 3'd7;
+
     function automatic logic [4:0] calc_stop_ticks (
         input logic [1:0] word_len,
         input logic       stop_bits

@@ -1,4 +1,4 @@
-module uart16550a_tx (
+module uart_16550a_tx (
     input  logic        clk,
     input  logic        rst,
     input  logic [15:0] baud_div,
@@ -15,31 +15,26 @@ module uart16550a_tx (
     input  logic        lcr_break_en,
     output logic        tsr_empty
 );
-    import uart16550a_pkg::*;
+    import uart_16550a_pkg::*;
 
     typedef enum logic [2:0] {
-        IDLE     = 3'd0,
-        START    = 3'd1,
-        DATA     = 3'd2,
-        PARITY   = 3'd3,
-        STOP     = 3'd4
+        ST_IDLE     = 3'd0,
+        ST_START    = 3'd1,
+        ST_DATA     = 3'd2,
+        ST_PARITY   = 3'd3,
+        ST_STOP     = 3'd4
     } state_t;
 
     state_t      state;
+
+    // === Baud Generator === //
 
     logic [15:0] baud_div_q;
     logic [15:0] baud_counter;
     logic        baud_tick_16x;
 
-    logic [7:0]  tsr;        // Transmit Shift Register
-    logic [2:0]  max_bits;   // Number of bits per character minus 1
-    logic [2:0]  bit_cnt;    // Counter to track the character bits transmitted
-    logic [4:0]  stop_ticks; // Number of baud ticks for the STOP phase
-    logic [4:0]  counter;    // Counter to track TX sampling ticks and STOP phase ticks
-    logic        parity;     // The computed parity bit
-
     always_ff @(posedge clk) begin
-        if (rst || (state == IDLE) || (baud_div_q == 0)) begin
+        if (rst || (state == ST_IDLE) || (baud_div_q == 0)) begin
             baud_counter  <= 0;
             baud_tick_16x <= 0;
         end
@@ -53,23 +48,14 @@ module uart16550a_tx (
         end
     end
 
-    always_ff @(posedge clk) begin
-        if (rst) begin
-            tx <= 1;
-        end
-        else if (lcr_break_en) begin
-            tx <= 0;
-        end
-        else begin
-            unique case (state)
-                IDLE:   tx <= 1;
-                START:  tx <= 0;
-                DATA:   tx <= tsr[0];
-                PARITY: tx <= parity;
-                STOP:   tx <= 1;
-            endcase
-        end
-    end
+    // === Main TX Engine === //
+
+    logic [7:0]  tsr;        // Transmit Shift Register
+    logic [2:0]  max_bits;   // Number of bits per character minus 1
+    logic [2:0]  bit_cnt;    // Counter to track the character bits transmitted
+    logic [4:0]  stop_ticks; // Number of baud ticks for the ST_STOP phase
+    logic [4:0]  counter;    // Counter to track TX sampling ticks and ST_STOP phase ticks
+    logic        parity;     // The computed parity bit
 
     always_ff @(posedge clk) begin
         if (rst) begin
@@ -82,11 +68,11 @@ module uart16550a_tx (
             parity     <= 0;
             tx_ready   <= 1;
             tsr_empty  <= 1;
-            state      <= IDLE;
+            state      <= ST_IDLE;
         end
         else begin
             unique case (state)
-                IDLE: begin
+                ST_IDLE: begin
                     if (tx_ready && tx_start) begin
                         baud_div_q <= baud_div;
                         tsr        <= tx_data;
@@ -97,21 +83,21 @@ module uart16550a_tx (
                         parity     <= calc_parity(tx_data, lcr_word_len, lcr_parity_even, lcr_parity_stick);
                         tx_ready   <= 0;
                         tsr_empty  <= 0;
-                        state      <= START;
+                        state      <= ST_START;
                     end
                 end
-                START: begin
+                ST_START: begin
                     if (baud_tick_16x) begin
                         if (counter == 15) begin
                             counter <= 0;
-                            state   <= DATA;
+                            state   <= ST_DATA;
                         end
                         else begin
                             counter <= counter + 1;
                         end
                     end
                 end
-                DATA: begin
+                ST_DATA: begin
                     if (baud_tick_16x) begin
                         if (counter == 15) begin
                             counter <= 0;
@@ -119,7 +105,7 @@ module uart16550a_tx (
                             bit_cnt <= bit_cnt + 1;
 
                             if (bit_cnt == max_bits) begin
-                                state <= lcr_parity_en ? PARITY : STOP;
+                                state <= lcr_parity_en ? ST_PARITY : ST_STOP;
                             end
                         end
                         else begin
@@ -127,30 +113,50 @@ module uart16550a_tx (
                         end
                     end
                 end
-                PARITY: begin
+                ST_PARITY: begin
                     if (baud_tick_16x) begin
                         if (counter == 15) begin
                             counter <= 0;
-                            state   <= STOP;
+                            state   <= ST_STOP;
                         end
                         else begin
                             counter <= counter + 1;
                         end
                     end
                 end
-                STOP: begin
+                ST_STOP: begin
                     if (baud_tick_16x) begin
                         if (counter == stop_ticks) begin
                             counter   <= 0;
                             tx_ready  <= 1;
                             tsr_empty <= 1;
-                            state     <= IDLE;
+                            state     <= ST_IDLE;
                         end
                         else begin
                             counter <= counter + 1;
                         end
                     end
                 end
+            endcase
+        end
+    end
+
+    // === TX Driving Logic === //
+
+    always_ff @(posedge clk) begin
+        if (rst) begin
+            tx <= 1;
+        end
+        else if (lcr_break_en) begin
+            tx <= 0;
+        end
+        else begin
+            unique case (state)
+                ST_IDLE:   tx <= 1;
+                ST_START:  tx <= 0;
+                ST_DATA:   tx <= tsr[0];
+                ST_PARITY: tx <= parity;
+                ST_STOP:   tx <= 1;
             endcase
         end
     end

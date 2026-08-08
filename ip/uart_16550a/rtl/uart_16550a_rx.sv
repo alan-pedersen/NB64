@@ -1,4 +1,4 @@
-module uart16550a_rx (
+module uart_16550a_rx (
     input  logic        clk,
     input  logic        rst,
     input  logic [15:0] baud_div,
@@ -14,60 +14,56 @@ module uart16550a_rx (
     input  logic        lcr_parity_even,
     input  logic        lcr_parity_stick
 );
-    import uart16550a_pkg::*;
+    import uart_16550a_pkg::*;
 
     typedef enum logic [2:0] {
-        IDLE   = 3'd0,
-        START  = 3'd1,
-        DATA   = 3'd2,
-        PARITY = 3'd3,
-        STOP   = 3'd4
+        ST_IDLE   = 3'd0,
+        ST_START  = 3'd1,
+        ST_DATA   = 3'd2,
+        ST_PARITY = 3'd3,
+        ST_STOP   = 3'd4
     } state_t;
 
-    state_t      state;
+    state_t state;
 
-    logic        rx_meta;
-    logic        rx_sync;
-    logic        rx_prev;
+    // === RX Datapath === //
 
-    logic [15:0] baud_div_q;
-    logic [15:0] baud_counter;
-    logic        baud_tick_16x;
-
-    logic [7:0]  rsr;
-    logic [3:0]  max_bits; // +1 bit
-    logic [3:0]  bit_cnt;  // +1 bit
-    logic [4:0]  counter;  // Can reduce one bit since only to 16
-    logic        parity_expected;
-    logic        parity_received;
-
-    logic        is_zero_data;
-    logic        is_zero_parity;
-    logic        break_condition;
-
-    logic        midpoint_pe;
-    logic        midpoint_fe;
-    logic        midpoint_bi;
-
-    assign is_zero_data    = (rsr == 8'd0);
-    assign is_zero_parity  = (!lcr_parity_en || (parity_received == 1'b0));
-    assign break_condition = is_zero_data && is_zero_parity;
+    logic       rx_meta;
+    logic       rx_sync;
+    logic       rx_prev;
+    logic [1:0] rx_history;
+    logic       rx_vote;
 
     always_ff @(posedge clk) begin
         if (rst) begin
-            rx_meta <= 1;
-            rx_sync <= 1;
-            rx_prev <= 1;
+            rx_meta    <= 1;
+            rx_sync    <= 1;
+            rx_prev    <= 1;
+            rx_history <= 2'b11;
         end
         else begin
             rx_meta <= rx;
             rx_sync <= rx_meta;
             rx_prev <= rx_sync;
+
+            if (baud_tick_16x) begin
+                rx_history <= {rx_history[0], rx_sync};
+            end
         end
     end
 
+    assign rx_vote = (rx_history[1] & rx_history[0]) |
+                     (rx_history[1] & rx_sync)       |
+                     (rx_history[0] & rx_sync);
+    
+    // === Baud Generator === //
+
+    logic [15:0] baud_div_q;
+    logic [15:0] baud_counter;
+    logic        baud_tick_16x;
+
     always_ff @(posedge clk) begin
-        if (rst || (state == IDLE) || (baud_div_q == 0)) begin
+        if (rst || (state == ST_IDLE) || (baud_div_q == 0)) begin
             baud_counter  <= 0;
             baud_tick_16x <= 0;
         end
@@ -80,6 +76,28 @@ module uart16550a_rx (
             baud_tick_16x <= 0;
         end
     end
+
+    // === Main RX Engine === //
+
+    logic [7:0] rsr;
+    logic [3:0] max_bits; // +1 bit
+    logic [3:0] bit_cnt;  // +1 bit
+    logic [4:0] counter;  // Can reduce one bit since only to 16
+
+    logic       parity_expected;
+    logic       parity_received;
+
+    logic       is_zero_data;
+    logic       is_zero_parity;
+    logic       break_condition;
+
+    logic       midpoint_pe;
+    logic       midpoint_fe;
+    logic       midpoint_bi;
+
+    assign is_zero_data    = (rsr == 8'd0);
+    assign is_zero_parity  = (!lcr_parity_en || (parity_received == 1'b0));
+    assign break_condition = is_zero_data && is_zero_parity;
 
     always_ff @(posedge clk) begin
         if (rst) begin
@@ -98,7 +116,7 @@ module uart16550a_rx (
             rx_pe           <= 0;
             rx_fe           <= 0;
             rx_bi           <= 0;
-            state           <= IDLE;
+            state           <= ST_IDLE;
         end
         else begin
             rx_valid <= 0;
@@ -107,7 +125,7 @@ module uart16550a_rx (
             rx_bi    <= 0;
 
             unique case (state)
-                IDLE: begin
+                ST_IDLE: begin
                     if ((rx_sync == 0) && (rx_prev == 1)) begin
                         baud_div_q  <= baud_div;
                         rsr         <= 0;
@@ -117,79 +135,80 @@ module uart16550a_rx (
                         midpoint_pe <= 0;
                         midpoint_fe <= 0;
                         midpoint_bi <= 0;
-                        state       <= START;
+                        state       <= ST_START;
                     end
                 end
-                START: begin
+                ST_START: begin
                     if (baud_tick_16x) begin
                         if (counter == 15) begin
                             counter <= 0;
-                            state   <= DATA;
+                            state   <= ST_DATA;
                         end
                         else begin
                             counter <= counter + 1;
 
-                            if ((counter == 7) && (rx_sync != 0)) begin
-                                state <= IDLE;
+                            if ((counter == 9) && (rx_vote != 0)) begin
+                                state <= ST_IDLE;
                             end
                         end
                     end
                 end
-                DATA: begin
+                ST_DATA: begin
                     if (baud_tick_16x) begin
                         if (counter == 15) begin
                             counter <= 0;
 
+                            // Use '>' because bit_cnt incremented to one before first hit of below line
                             if (bit_cnt > max_bits) begin
                                 parity_expected <= calc_parity(rsr, lcr_word_len, lcr_parity_even, lcr_parity_stick);
-                                state           <= lcr_parity_en ? PARITY : STOP;
+                                state           <= lcr_parity_en ? ST_PARITY : ST_STOP;
                             end
                         end
                         else begin
                             counter <= counter + 1;
 
-                            if (counter == 7) begin
-                                rsr[bit_cnt[2:0]] <= rx_sync;
+                            if (counter == 9) begin
+                                rsr[bit_cnt[2:0]] <= rx_vote;
                                 bit_cnt           <= bit_cnt + 1;
                             end
                         end
                     end
                 end
-                PARITY: begin
+                ST_PARITY: begin
                     if (baud_tick_16x) begin
                         if (counter == 15) begin
                             counter <= 0;
-                            state   <= STOP;
+                            state   <= ST_STOP;
                         end
                         else begin
                             counter <= counter + 1;
 
-                            if (counter == 7) begin
-                                parity_received <= rx_sync;
+                            if (counter == 9) begin
+                                parity_received <= rx_vote;
 
-                                if (rx_sync != parity_expected) begin
+                                if (rx_vote != parity_expected) begin
                                     midpoint_pe <= 1;
                                 end
                             end
                         end
                     end
                 end
-                STOP: begin
+                ST_STOP: begin
                     if (baud_tick_16x) begin
-                        if (counter == 15) begin
+                        if (counter == 10) begin
                             counter  <= 0;
                             rx_valid <= 1;
                             rx_data  <= rsr;
                             rx_pe    <= midpoint_pe;
                             rx_fe    <= midpoint_fe;
                             rx_bi    <= midpoint_bi;
-                            state    <= IDLE;
+                            state    <= ST_IDLE;
                         end
                         else begin
                             counter <= counter + 1;
 
-                            if (counter == 7) begin
-                                if (rx_sync != 1) begin
+                            if (counter == 9) begin
+                                if (rx_vote != 1) begin
                                     midpoint_fe <= 1;
 
                                     if (break_condition) begin
