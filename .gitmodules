@@ -1,0 +1,3 @@
+[submodule "ip/uart_16550a"]
+	path = ip/uart_16550a
+	url = https://github.com/alan-pedersen/uart_16550a.git
