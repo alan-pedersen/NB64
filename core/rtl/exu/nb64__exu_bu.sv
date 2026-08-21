@@ -26,8 +26,8 @@ module nb64__exu_bu #(
     logic            is_lts;
     logic            branch_cond;
 
-    logic [XLEN-1:0] bta_target;
-    logic [XLEN-1:0] agu_target;
+    logic [XLEN-1:0] bta_target; // Valid for BRANCH and JAL
+    logic [XLEN-1:0] agu_target; // Valid for JALR
 
     assign is_eq  = (rs1 == rs2);
     assign is_ltu = (rs1 < rs2);
